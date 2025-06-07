@@ -7,7 +7,10 @@ import xgboost as xgb
 model = joblib.load('xgboost_high_risk_model.pkl')
 feature_columns = joblib.load('feature_columns.pkl')  # list of features used during training
 
-st.title("High-Risk Pregnancy Prediction")
+st.title("High-Risk Pregnancy Prediction App")
+
+st.title("helps ANMs and  Govt")
+
 
 input_data = {}
 
