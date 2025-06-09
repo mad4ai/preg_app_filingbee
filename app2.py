@@ -1,80 +1,104 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
-import xgboost as xgb
+import shap
+import matplotlib.pyplot as plt
+import pickle
 
-# Load model and feature columns
-model = joblib.load('xgboost_high_risk_model.pkl')
-feature_columns = joblib.load('feature_columns.pkl')  # list of features used during training
+# --- Load model and feature order ---
+model = joblib.load("xgboost_high_risk_model.pkl")
+with open("model_features.pkl", "rb") as f:
+    feature_order = pickle.load(f)
 
-st.title("High-Risk Pregnancy Prediction App")
+# --- Define UI inputs ---
+st.title("High-Risk Pregnancy Predictor")
 
-st.title("helps ANMs and  Govt")
+st.header("Enter Pregnancy Details")
 
+def user_input_features():
+    d = {}
 
-input_data = {}
+    # Demographics
+    d['AGE'] = st.slider("Mother's Age", 12.0, 55.0, 25.0)
+    d['HEIGHT'] = st.slider("Height (cm)", 100.0, 200.0, 155.0)
+    d['WEIGHT'] = st.slider("Weight (kg)", 30.0, 150.0, 55.0)
 
-# Numerical inputs with sliders
-input_data['GRAVIDA'] = st.slider('Gravida (Number of pregnancies)', min_value=0, max_value=15, value=1, step=1)
-input_data['PARITY'] = st.slider('Parity (Number of births)', min_value=0, max_value=15, value=0, step=1)
-input_data['ABORTIONS'] = st.slider('Abortions', min_value=0, max_value=10, value=0, step=1)
-input_data['LIVE'] = st.slider('Live Births', min_value=0, max_value=15, value=0, step=1)
-input_data['DEATH'] = st.slider('Previous Deaths', min_value=0, max_value=5, value=0, step=1)
+    # Pregnancy history
+    for field in ['GRAVIDA', 'PARITY', 'ABORTIONS', 'LIVE', 'DEATH']:
+        d[field] = st.number_input(field, min_value=0, max_value=15, value=0)
 
-input_data['AGE'] = st.slider('Age (years)', min_value=10, max_value=60, value=25, step=1)
-input_data['HEIGHT'] = st.slider('Height (cm)', min_value=130, max_value=210, value=160, step=1)
-input_data['WEIGHT'] = st.slider('Weight (kg)', min_value=30, max_value=150, value=60, step=1)
+    # Blood pressure and vitals
+    d['BP'] = st.slider("BP (mmHg)", 70.0, 200.0, 120.0)
+    d['BP1'] = st.slider("BP1 (second reading)", 70.0, 200.0, 80.0)
+    d['HEART_RATE'] = st.slider("Heart Rate", 40, 200, 80)
+    d['PULSE_RATE'] = st.slider("Pulse Rate", 40.0, 200.0, 80.0)
+    d['RESPIRATORY_RATE'] = st.slider("Respiratory Rate", 10.0, 50.0, 18.0)
+    d['FEVER'] = st.slider("Temperature (°C)", 35.0, 41.0, 36.5)
 
-input_data['BP'] = st.slider('Systolic Blood Pressure', min_value=70, max_value=200, value=120, step=1)
-input_data['BP1'] = st.slider('Diastolic Blood Pressure', min_value=40, max_value=130, value=80, step=1)
+    # Blood work
+    d['HEMOGLOBIN'] = st.slider("Hemoglobin (g/dL)", 2.0, 18.0, 11.0)
+    d['BLOOD_SUGAR'] = st.slider("Random Blood Sugar (mg/dL)", 50.0, 500.0, 100.0)
+    d['FASTING'] = st.slider("Fasting Sugar (mg/dL)", 50, 200, 90)
+    d['POST_PRANDIAL'] = st.slider("Post Prandial (mg/dL)", 50, 300, 120)
+    d['OGTT_2_HOURS'] = st.slider("OGTT after 2 hours (mg/dL)", 50.0, 300.0, 120.0)
+    d['OGTT_GDM'] = st.selectbox("OGTT GDM Diagnosis", [0, 1])
 
-input_data['HEMOGLOBIN'] = st.slider('Hemoglobin (g/dL)', min_value=4.0, max_value=18.0, value=12.0, step=0.1)
-input_data['BLOOD_SUGAR'] = st.slider('Blood Sugar (mg/dL)', min_value=40, max_value=500, value=90, step=1)
-input_data['FASTING'] = st.slider('Fasting Blood Sugar (mg/dL)', min_value=40, max_value=250, value=85, step=1)
-input_data['POST_PRANDIAL'] = st.slider('Post Prandial Blood Sugar (mg/dL)', min_value=60, max_value=350, value=120, step=1)
-input_data['OGTT_2_HOURS'] = st.slider('OGTT 2 Hours (mg/dL)', min_value=60, max_value=300, value=140, step=1)
+    # Supplements
+    for col in ['IFA_QUANTITY', 'CALC_QUANTITY', 'FOLIC_QUANTITY', 'ALB_QUANTITY']:
+        d[col] = st.slider(f"{col.replace('_', ' ').title()} (tablets)", 0.0, 500.0, 100.0)
 
-input_data['IFA_QUANTITY'] = st.slider('IFA Quantity (tablets)', min_value=0, max_value=200, value=30, step=1)
-input_data['CALC_QUANTITY'] = st.slider('Calcium Quantity (tablets)', min_value=0, max_value=200, value=30, step=1)
-input_data['FOLIC_QUANTITY'] = st.slider('Folic Acid Quantity (tablets)', min_value=0, max_value=200, value=30, step=1)
-input_data['ALB_QUANTITY'] = st.slider('Alb Quantity (tablets)', min_value=0, max_value=200, value=0, step=1)
-input_data['IRON_SUCROSE_DOSE'] = st.slider('Iron Sucrose Dose (mg)', min_value=0, max_value=500, value=0, step=10)
+    # Infections & screening results
+    for test in ['VDRL_RESULT', 'HIV_RESULT', 'HBSAG_RESULT', 'HEP_RESULT', 'THYROID', 'RH_NEGATIVE', 'SYPHYLIS']:
+        d[test] = st.selectbox(f"{test.replace('_', ' ').title()}", [0, 1])
 
-input_data['URINE_SUGAR'] = st.selectbox('Urine Sugar Present', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
-input_data['URINE_ALBUMIN'] = st.selectbox('Urine Albumin Present', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
+    # Urine tests
+    d['URINE_SUGAR'] = st.selectbox("Urine Sugar", [0, 1])
+    d['URINE_ALBUMIN'] = st.selectbox("Urine Albumin", [0, 1])
 
-input_data['UTERUS_SIZE'] = st.slider('Uterus Size (weeks)', min_value=0, max_value=45, value=20, step=1)
-input_data['FOETAL_POSITION'] = st.selectbox('Fetal Position', options=[0, 1], format_func=lambda x: 'Normal' if x == 0 else 'Abnormal')
-input_data['MAL_PRESENT'] = st.selectbox('Malpresentation Present', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
-input_data['PLACENTA'] = st.selectbox('Placenta Issues', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
-input_data['USG_SCAN'] = st.selectbox('Ultrasound Scan Done', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
-input_data['TT_GIVEN'] = st.selectbox('TT Vaccine Given', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
+    # Scan/Clinical findings
+    for col in ['USG_SCAN', 'MAL_PRESENT', 'PLACENTA', 'FOETAL_POSITION']:
+        d[col] = st.selectbox(col.replace("_", " ").title(), [0, 1])
 
-input_data['PHQ_SCORE'] = st.slider('PHQ (Patient Health Questionnaire) Score', min_value=0, max_value=27, value=5, step=1)
-input_data['GAD_SCORE'] = st.slider('GAD (General Anxiety Disorder) Score', min_value=0, max_value=21, value=5, step=1)
+    d['UTERUS_SIZE'] = st.number_input("Uterus Size (weeks)", 0, 50, 20)
 
-input_data['PULSE_RATE'] = st.slider('Pulse Rate (beats per minute)', min_value=40, max_value=150, value=75, step=1)
-input_data['RESPIRATORY_RATE'] = st.slider('Respiratory Rate (breaths per minute)', min_value=10, max_value=40, value=16, step=1)
+    # Risk scores
+    d['PHQ_SCORE'] = st.slider("PHQ Score (Depression)", 0, 27, 5)
+    d['GAD_SCORE'] = st.slider("GAD Score (Anxiety)", 0, 21, 5)
 
-input_data['FEVER'] = st.selectbox('Fever Present', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
+    # Treatment/Medication
+    d['TT_GIVEN'] = st.selectbox("TT Given", [0, 1])
+    d['IRON_SUCROSE_DOSE'] = st.slider("Iron Sucrose Dose (mg)", 0, 500, 100)
 
-input_data['Weeks_Pregnant'] = st.slider('Weeks Pregnant', min_value=0, max_value=45, value=20, step=1)
+    # Systemic Disease
+    d['SYS_DISEASE_encoded'] = st.selectbox("Any Systemic Disease", [0, 1])
 
-input_data['SYS_DISEASE_encoded'] = st.selectbox('Systemic Disease', options=[0, 1, 2, 3], format_func=lambda x: ['None', 'Hypertension', 'Diabetes', 'Other'][x])
+   
 
-# Fix spelling to match model training
-input_data['SYPHILIS'] = st.selectbox('Syphilis', options=[0, 1], format_func=lambda x: 'No' if x == 0 else 'Yes')
+    return pd.DataFrame([d])
 
-# Prediction button
-if st.button("Predict High-Risk Pregnancy"):
-    input_df = pd.DataFrame([input_data])
-    
-    # Ensure all feature columns present and ordered
-    for col in feature_columns:
-        if col not in input_df.columns:
-            input_df[col] = 0
-    input_df = input_df[feature_columns]
+# --- Collect input and make prediction ---
+X_input = user_input_features()
+X_input = X_input[feature_order]  # ensure correct order
 
-    prediction = model.predict(input_df)[0]
-    label = "High Risk" if prediction == 1 else "Low Risk"
-    st.success(f"Prediction: {label}")
+if st.button("Predict Risk"):
+    pred = model.predict(X_input)[0]
+    prob = model.predict_proba(X_input)[0][1]
+
+    st.subheader("Prediction")
+    st.write("🚨 High-Risk Pregnancy" if pred == 1 else "✅ Low-Risk Pregnancy")
+    st.write(f"Probability: `{prob:.2%}`")
+
+    # --- SHAP Explainability ---
+st.subheader("Model Explainability")
+
+explainer = shap.Explainer(model)
+shap_values = explainer(X_input)
+
+# Create a matplotlib figure manually to avoid deprecated Streamlit behavior
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+shap.plots.waterfall(shap_values[0], max_display=15, show=False)
+st.pyplot(fig, bbox_inches='tight')
+
