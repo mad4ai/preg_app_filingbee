@@ -5,3 +5,5 @@ numpy
 scikit-learn
 joblib  # or dill/pickle if used
 shap
+matplotlib==3.10.0
+
