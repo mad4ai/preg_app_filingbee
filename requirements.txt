@@ -4,3 +4,6 @@ pandas
 numpy
 scikit-learn
 joblib  # or dill/pickle if used
+shap
+matplotlib
+pickle
